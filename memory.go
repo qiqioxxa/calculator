@@ -17,3 +17,7 @@ func (m *Memory) Sub(a float64) float64 {
 func (m *Memory) Recall() float64 {
 	return m.value
 }
+
+func (m *Memory) Clear() {
+	m.value = 0
+}
