@@ -1,93 +1,57 @@
 package main
 
-import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-)
+import "testing"
 
-func TestHandleCalc(t *testing.T) {
-	tests := []struct {
-		name       string
-		method     string
-		body       string
-		wantStatus int
-		wantRes    float64
-		wantErr    bool
-	}{
-		{"add", http.MethodPost, `{"op":"add","a":4,"b":6}`, http.StatusOK, 10, false},
-		{"div by zero", http.MethodPost, `{"op":"div","a":10,"b":0}`, http.StatusOK, 0, true},
-		{"sqrt", http.MethodPost, `{"op":"sqrt","a":16,"b":0}`, http.StatusOK, 4, false},
-		{"unknown op", http.MethodPost, `{"op":"bad","a":1,"b":2}`, http.StatusOK, 0, true},
-		{"wrong method", http.MethodGet, ``, http.StatusMethodNotAllowed, 0, false},
+func TestCalculatorBasicFlow(t *testing.T) {
+	c := NewCalculator()
+
+	// 12 + 8 = 20
+	c.InputDigit("1")
+	c.InputDigit("2")
+	c.ChooseOp("add", "+")
+	c.InputDigit("8")
+	c.Calculate()
+
+	if c.Display != "20" {
+		t.Fatalf("12 + 8: got %s; want 20", c.Display)
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(tc.method, "/api/calc", bytes.NewBufferString(tc.body))
-			rec := httptest.NewRecorder()
+	// Деление на 0
+	c.ChooseOp("div", "÷")
+	c.InputDigit("0")
+	c.Calculate()
+	if !c.hasError {
+		t.Errorf("expected error on division by zero")
+	}
 
-			handleCalc(rec, req)
-
-			if rec.Code != tc.wantStatus {
-				t.Fatalf("status = %d; want %d", rec.Code, tc.wantStatus)
-			}
-			if tc.wantStatus != http.StatusOK {
-				return
-			}
-
-			var resp calcResponse
-			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-				t.Fatalf("failed to decode response: %v", err)
-			}
-			if tc.wantErr && resp.Error == "" {
-				t.Errorf("expected error in response, got empty")
-			}
-			if !tc.wantErr {
-				if resp.Error != "" {
-					t.Errorf("unexpected error: %s", resp.Error)
-				}
-				if resp.Result != tc.wantRes {
-					t.Errorf("result = %v; want %v", resp.Result, tc.wantRes)
-				}
-			}
-		})
+	// Сброс
+	c.Clear()
+	if c.Display != "0" || c.hasError {
+		t.Errorf("Clear() failed: Display=%s, hasError=%v", c.Display, c.hasError)
 	}
 }
 
-func TestHandleMemory(t *testing.T) {
-	calcMem.Clear()
+func TestCalculatorUnaryAndMemory(t *testing.T) {
+	c := NewCalculator()
 
-	steps := []struct {
-		op   string
-		val  float64
-		want float64
-	}{
-		{"m+", 25, 25},
-		{"m-", 5, 20},
-		{"mr", 0, 20},
-		{"mc", 0, 0},
+	// sqrt(9) = 3
+	c.InputDigit("9")
+	c.UnaryOp("sqrt", "√")
+	if c.Display != "3" {
+		t.Fatalf("sqrt(9): got %s; want 3", c.Display)
 	}
 
-	for _, step := range steps {
-		payload, _ := json.Marshal(memoryRequest{Op: step.op, Value: step.val})
-		req := httptest.NewRequest(http.MethodPost, "/api/memory", bytes.NewReader(payload))
-		rec := httptest.NewRecorder()
+	// Сохраняем 3 в память (M+), очищаем экран, достаём (MR)
+	c.MemOp("m+")
+	c.Clear()
+	c.MemOp("mr")
+	if c.Display != "3" {
+		t.Fatalf("MR: got %s; want 3", c.Display)
+	}
 
-		handleMemory(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("op %s: status = %d; want 200", step.op, rec.Code)
-		}
-
-		var resp memoryResponse
-		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-			t.Fatalf("op %s: decode error: %v", step.op, err)
-		}
-		if resp.Memory != step.want {
-			t.Errorf("op %s: memory = %v; want %v", step.op, resp.Memory, step.want)
-		}
+	// Очищаем память (MC)
+	c.MemOp("mc")
+	if c.Mem.Recall() != 0 {
+		t.Errorf("MC: memory = %v; want 0", c.Mem.Recall())
 	}
 }
